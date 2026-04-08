@@ -13,11 +13,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -26,32 +21,20 @@ jobs:
 
       - name: Setup Android SDK
         run: |
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          cd $HOME/android-sdk/cmdline-tools
+          curl -sL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
+          unzip -q cmdline-tools.zip
+          mv cmdline-tools latest 2>/dev/null || true
+          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-          if [ ! -d "$HOME/android-sdk" ]; then
-            mkdir -p $HOME/android-sdk
-            cd $HOME/android-sdk
-            curl -sL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
-            unzip -q cmdline-tools.zip
-            mkdir -p cmdline-tools/latest
-            mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-            yes | ./cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-            ./cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125" > /dev/null
-          fi
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Generate native Android project
-        run: npx expo prebuild --platform android --clean
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build APK (Debug)
+      - name: Build APK
         run: |
           cd android
           chmod +x ./gradlew
-          ./gradlew assembleDebug --stacktrace 2>&1 | tail -100
+          ./gradlew assembleDebug --no-daemon 2>&1
 
       - name: Upload APK
         if: success()
@@ -59,3 +42,9 @@ jobs:
         with:
           name: app-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Show build errors
+        if: failure()
+        run: |
+          cat android/app/build/outputs/logs/*.log 2>/dev/null || echo "No logs found"
+          find android -name "*.log" -type f 2>/dev/null | head -5
