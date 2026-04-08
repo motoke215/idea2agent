@@ -2,33 +2,110 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, SafeAreaView, KeyboardAvoidingView, Platform,
-  Animated, ActivityIndicator,
+  Animated, ActivityIndicator, Modal, useColorScheme,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
+import * as Network from 'expo-network';
 
-import { generateIdea, extractInstructions } from './src/lib/api';
+import { generateIdea, extractInstructions, DEFAULT_TIMEOUT, MODEL_REGISTRY, MODEL_GROUPS, PROVIDER_LABELS } from './src/lib/api';
 import { useToast } from './src/hooks/useToast';
 import { ToastContainer } from './src/components/Toast';
 import Skeleton from './src/components/Skeleton';
 import ResultRenderer from './src/components/ResultRenderer';
 import { colors, radius } from './src/theme';
 
-const PROVIDERS = [
-  { value: 'deepseek', label: 'DeepSeek', placeholder: 'deepseek-chat' },
-  { value: 'openai', label: 'OpenAI', placeholder: 'gpt-4o' },
-  { value: 'custom', label: '自定义', placeholder: 'your-model-name' },
-];
+/** 默认选中的模型 */
+const DEFAULT_MODEL = 'deepseek-chat';
 
+/** 示例想法 */
 const EXAMPLES = [
   '帮助独立开发者追踪MRR和用户流失率的轻量级SaaS仪表板',
   '用AI自动生成每日晨报并推送通知的工具',
   '面向设计师的字体配对推荐工具，支持实时预览',
 ];
 
+/* ─────────────────────────────────────────────
+   下拉菜单组件
+───────────────────────────────────────────── */
+function ModelPicker({ selectedModel, onSelect }) {
+  const [visible, setVisible] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const info = MODEL_REGISTRY[selectedModel];
+  const scrollRef = useRef(null);
+
+  const handleSelect = useCallback((modelId) => {
+    onSelect(modelId);
+    setVisible(false);
+    setExpanded(false);
+  }, [onSelect]);
+
+  return (
+    <>
+      <TouchableOpacity style={s.pickerBtn} onPress={() => { setVisible(true); setExpanded(true); }} activeOpacity={0.8}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.pickerLabel}>已选模型</Text>
+          <Text style={s.pickerValue}>{info?.label || selectedModel}</Text>
+        </View>
+        <Text style={s.pickerArrow}>▼</Text>
+      </TouchableOpacity>
+
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={() => { setVisible(false); setExpanded(false); }}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => { setVisible(false); setExpanded(false); }}>
+          <View style={s.dropdownContainer}>
+            <View style={s.dropdownHeader}>
+              <Text style={s.dropdownTitle}>选择模型</Text>
+              <TouchableOpacity onPress={() => { setVisible(false); setExpanded(false); }}>
+                <Text style={s.dropdownClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView ref={scrollRef} style={s.dropdownList} showsVerticalScrollIndicator={false}>
+              {MODEL_GROUPS.map(group => (
+                <View key={group.group}>
+                  <View style={s.groupHeader}>
+                    <Text style={s.groupLabel}>{group.group}</Text>
+                  </View>
+                  {group.models.map(modelId => {
+                    const m = MODEL_REGISTRY[modelId];
+                    const isSelected = modelId === selectedModel;
+                    const providerLabel = PROVIDER_LABELS[m?.provider] || m?.provider;
+                    return (
+                      <TouchableOpacity
+                        key={modelId}
+                        style={[s.modelItem, isSelected && s.modelItemSelected]}
+                        onPress={() => handleSelect(modelId)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={[s.modelName, isSelected && s.modelNameSelected]}>{m?.label || modelId}</Text>
+                          {m && (
+                            <Text style={s.modelProvider}>
+                              {providerLabel} · {m.defaultModel}
+                              {m.isLocal && ' · 本地'}
+                              {m.isCustom && ' · 自定义地址'}
+                            </Text>
+                          )}
+                        </View>
+                        {isSelected && <Text style={s.checkmark}>✓</Text>}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Tab 栏
+───────────────────────────────────────────── */
 function TabBar({ active, onChange }) {
   return (
     <View style={s.tabBar}>
@@ -45,6 +122,9 @@ function Label({ children }) {
   return <Text style={s.label}>{children}</Text>;
 }
 
+/* ─────────────────────────────────────────────
+   空状态
+───────────────────────────────────────────── */
 function EmptyState() {
   const pulse = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
@@ -70,13 +150,28 @@ function EmptyState() {
   );
 }
 
+/* ─────────────────────────────────────────────
+   检查网络
+───────────────────────────────────────────── */
+async function checkNetwork() {
+  try {
+    const state = await Network.getNetworkStateAsync();
+    if (!state.isConnected) throw new Error('当前无网络连接，请检查网络后重试');
+  } catch (err) {
+    if (err.message.includes('无网络')) throw err;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   主应用
+───────────────────────────────────────────── */
 export default function App() {
+  const colorScheme = useColorScheme();
   const [tab, setTab] = useState(0);
   const [idea, setIdea] = useState('');
-  const [provider, setProvider] = useState('deepseek');
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  // modelConfigs: { [modelId]: { apiKey, endpoint } }
+  const [modelConfigs, setModelConfigs] = useState({});
   const [showAdv, setShowAdv] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
@@ -84,50 +179,115 @@ export default function App() {
   const { toasts, addToast } = useToast();
   const scrollRef = useRef(null);
 
+  const statusBarStyle = colorScheme === 'dark' ? 'light' : 'dark';
+  const modelInfo = MODEL_REGISTRY[selectedModel] || {};
+  const currentProvider = modelInfo.provider;
+  const currentModelConfig = modelConfigs[selectedModel] || {};
+  const currentApiKey = currentModelConfig.apiKey || '';
+  const currentEndpoint = currentModelConfig.endpoint || modelInfo.endpoint || '';
+
+  // 加载保存的配置
   useEffect(() => {
-    AsyncStorage.getItem('cfg').then(raw => {
+    AsyncStorage.getItem('cfg_v3').then(raw => {
       if (!raw) return;
-      try { const c = JSON.parse(raw); if(c.apiKey) setApiKey(c.apiKey); if(c.provider) setProvider(c.provider); if(c.model) setModel(c.model); if(c.baseUrl) setBaseUrl(c.baseUrl); } catch {}
+      try {
+        const c = JSON.parse(raw);
+        if (c.selectedModel && MODEL_REGISTRY[c.selectedModel]) {
+          setSelectedModel(c.selectedModel);
+        }
+        if (c.modelConfigs) setModelConfigs(c.modelConfigs);
+      } catch {}
     });
   }, []);
 
   const saveConfig = useCallback(() => {
-    AsyncStorage.setItem('cfg', JSON.stringify({ apiKey, provider, model, baseUrl }));
-  }, [apiKey, provider, model, baseUrl]);
+    AsyncStorage.setItem('cfg_v3', JSON.stringify({
+      selectedModel,
+      modelConfigs,
+    }));
+  }, [selectedModel, modelConfigs]);
+
+  // 更新当前模型的 API Key
+  const updateApiKey = useCallback((key) => {
+    setModelConfigs(prev => ({
+      ...prev,
+      [selectedModel]: { ...(prev[selectedModel] || {}), apiKey: key, endpoint: currentEndpoint },
+    }));
+  }, [selectedModel, currentEndpoint]);
+
+  // 更新当前模型的 API 地址
+  const updateEndpoint = useCallback((endpoint) => {
+    setModelConfigs(prev => ({
+      ...prev,
+      [selectedModel]: { ...(prev[selectedModel] || {}), apiKey: currentApiKey, endpoint },
+    }));
+  }, [selectedModel, currentApiKey]);
 
   async function handleGenerate() {
     if (!idea.trim()) { addToast('请先输入你的产品想法 ✦', 'error'); return; }
-    if (!apiKey.trim()) { addToast('请在「配置」页填写 API Key', 'error'); setTab(2); return; }
-    saveConfig(); setLoading(true); setResult(''); setTab(1);
+
+    const key = currentApiKey;
+    if (!key && !modelInfo.isLocal) {
+      addToast(`请先在「配置」页填写 ${modelInfo.label} 的 API Key`, 'error');
+      setTab(2);
+      return;
+    }
+
+    try { await checkNetwork(); } catch (err) { addToast(err.message, 'error'); return; }
+
+    saveConfig();
+    setLoading(true);
+    setResult('');
+    setTab(1);
+
     try {
-      const content = await generateIdea({ idea, apiKey, provider, baseUrl, model });
+      const content = await generateIdea({
+        idea,
+        modelId: selectedModel,
+        providerApiKeys: { [currentProvider]: key },
+        customEndpoint: currentEndpoint,
+        timeout: DEFAULT_TIMEOUT,
+      });
       setResult(content);
       setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
     } catch (err) {
-      addToast(err.message || '未知错误，请稍后再试', 'error'); setTab(0);
-    } finally { setLoading(false); }
+      addToast(err.message || '未知错误，请稍后再试', 'error');
+      setTab(0);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleCopy() {
-    await Clipboard.setStringAsync(extractInstructions(result));
-    setCopied(true); addToast('开发指令已复制 ✓', 'success');
+    const text = extractInstructions(result);
+    if (!text) { addToast('无法提取开发指令，请尝试重新生成', 'error'); return; }
+    await Clipboard.setStringAsync(text);
+    setCopied(true);
+    addToast('开发指令已复制 ✓', 'success');
     setTimeout(() => setCopied(false), 2200);
   }
 
   async function handleDownload() {
+    if (!result) return;
     const slug = idea.slice(0,20).replace(/\s+/g,'-').replace(/[^\w\-]/g,'') || 'idea';
     const fn = `PRD-${slug}-${new Date().toISOString().slice(0,10)}.md`;
     const path = FileSystem.documentDirectory + fn;
     await FileSystem.writeAsStringAsync(path, result, { encoding: FileSystem.EncodingType.UTF8 });
-    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path, { mimeType:'text/markdown', dialogTitle:'保存 PRD 文档' });
-    addToast(`已准备 ${fn}`, 'info');
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(path, {
+        mimeType: 'text/markdown;charset=utf-8',
+        dialogTitle: '保存 PRD 文档',
+      });
+    } else {
+      addToast('当前设备不支持分享', 'error');
+    }
+    addToast(`已保存 ${fn}`, 'info');
   }
-
-  const cur = PROVIDERS.find(p => p.value === provider);
 
   return (
     <SafeAreaView style={s.safe}>
-      <StatusBar style="dark" backgroundColor={colors.bg} />
+      <StatusBar style={statusBarStyle} backgroundColor={colors.bg} />
+
       {/* Header */}
       <View style={s.header}>
         <View style={s.logoBox}><Text style={s.logoText}>⬡</Text></View>
@@ -140,7 +300,8 @@ export default function App() {
       <TabBar active={tab} onChange={setTab} />
 
       <View style={{ flex: 1, backgroundColor: colors.bg }}>
-        {/* ── Tab 0: Input ── */}
+
+        {/* ── Tab 0: 输入 ── */}
         {tab === 0 && (
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
@@ -159,9 +320,16 @@ export default function App() {
                 </ScrollView>
               </View>
 
-              {!apiKey && (
+              {/* 当前模型提示 */}
+              <TouchableOpacity style={s.modelHint} onPress={() => setTab(2)} activeOpacity={0.8}>
+                <Text style={s.modelHintIcon}>⚙</Text>
+                <Text style={s.modelHintText}>当前: {modelInfo.label}</Text>
+                <Text style={s.modelHintArrow}>›</Text>
+              </TouchableOpacity>
+
+              {!currentApiKey && !modelInfo.isLocal && (
                 <TouchableOpacity style={s.reminder} onPress={() => setTab(2)} activeOpacity={0.8}>
-                  <Text style={s.reminderText}>⚙  前往「配置」页填写 API Key</Text>
+                  <Text style={s.reminderText}>⚠  缺少 API Key，请前往「配置」页填写</Text>
                 </TouchableOpacity>
               )}
 
@@ -174,7 +342,7 @@ export default function App() {
           </KeyboardAvoidingView>
         )}
 
-        {/* ── Tab 1: Result ── */}
+        {/* ── Tab 1: 结果 ── */}
         {tab === 1 && (
           <View style={{ flex: 1 }}>
             {!loading && !result && <EmptyState />}
@@ -211,48 +379,101 @@ export default function App() {
           </View>
         )}
 
-        {/* ── Tab 2: Config ── */}
+        {/* ── Tab 2: 配置 ── */}
         {tab === 2 && (
           <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
             <View style={s.card}>
-              <Label>服务商</Label>
-              <View style={{ flexDirection:'row', gap: 8 }}>
-                {PROVIDERS.map(p => (
-                  <TouchableOpacity key={p.value} style={[s.provBtn, provider===p.value && s.provBtnOn]} onPress={() => setProvider(p.value)} activeOpacity={0.8}>
-                    <Text style={[s.provText, provider===p.value && s.provTextOn]}>{p.label}</Text>
-                  </TouchableOpacity>
-                ))}
+              <Label>选择模型</Label>
+              <ModelPicker selectedModel={selectedModel} onSelect={setSelectedModel} />
+
+              {/* 当前模型信息 */}
+              <View style={s.providerInfo}>
+                <Text style={s.providerInfoText}>
+                  {modelInfo.label || selectedModel}
+                  {modelInfo.isLocal && ' · 本地部署'}
+                  {modelInfo.isCustom && ' · 自定义地址'}
+                </Text>
               </View>
 
-              <View style={{ marginTop: 20 }}><Label>API Key</Label></View>
-              <TextInput value={apiKey} onChangeText={setApiKey} placeholder="sk-···" placeholderTextColor={colors.inkMuted} secureTextEntry autoCorrect={false} autoCapitalize="none" style={s.cfgInput} />
-              <Text style={s.helper}>Key 仅存储在本设备，不会被上传</Text>
+              {/* API 地址（所有模型都显示） */}
+              <View style={{ marginTop: 16 }}>
+                <Label>API 地址</Label>
+                <TextInput
+                  value={currentEndpoint}
+                  onChangeText={updateEndpoint}
+                  placeholder={modelInfo.endpoint || 'https://api.example.com/v1/chat/completions'}
+                  placeholderTextColor={colors.inkMuted}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  keyboardType="url"
+                  style={s.cfgInput}
+                />
+                <Text style={s.helper}>
+                  {modelInfo.isLocal ? '默认: http://localhost:11434/api/chat' : modelInfo.endpoint ? `默认: ${modelInfo.endpoint}` : '请填写 API 地址'}
+                </Text>
+              </View>
 
-              <TouchableOpacity style={s.advToggle} onPress={() => setShowAdv(!showAdv)} activeOpacity={0.75}>
-                <Text style={s.advToggleText}>{showAdv ? '▾' : '▸'} 高级选项</Text>
-              </TouchableOpacity>
+              {/* API Key 输入（非本地模型） */}
+              {!modelInfo.isLocal && (
+                <>
+                  <View style={{ marginTop: 16 }}><Label>API Key</Label></View>
+                  <TextInput
+                    value={currentApiKey}
+                    onChangeText={updateApiKey}
+                    placeholder={currentProvider === 'anthropic' ? 'sk-ant-···' : 'sk-···'}
+                    placeholderTextColor={colors.inkMuted}
+                    secureTextEntry
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    style={s.cfgInput}
+                  />
+                  <Text style={s.helper}>
+                    API Key 仅存储在本设备
+                  </Text>
+                </>
+              )}
+
+              {/* 已配置的模型列表 */}
+              {Object.keys(modelConfigs).length > 0 && (
+                <TouchableOpacity style={s.advToggle} onPress={() => setShowAdv(!showAdv)} activeOpacity={0.75}>
+                  <Text style={s.advToggleText}>
+                    {showAdv ? '▾' : '▸'} 已配置的模型（{Object.keys(modelConfigs).length} 个）
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               {showAdv && (
-                <View>
-                  <Label>模型名称（留空用默认）</Label>
-                  <TextInput value={model} onChangeText={setModel} placeholder={cur?.placeholder} placeholderTextColor={colors.inkMuted} autoCorrect={false} autoCapitalize="none" style={s.cfgInput} />
-                  {provider === 'custom' && (
-                    <>
-                      <View style={{ marginTop: 12 }}><Label>Base URL</Label></View>
-                      <TextInput value={baseUrl} onChangeText={setBaseUrl} placeholder="https://api.example.com" placeholderTextColor={colors.inkMuted} autoCorrect={false} autoCapitalize="none" keyboardType="url" style={s.cfgInput} />
-                    </>
+                <View style={{ marginTop: 12 }}>
+                  {Object.entries(modelConfigs).map(([modelId, cfg]) => {
+                    if (modelId === selectedModel) return null;
+                    const m = MODEL_REGISTRY[modelId];
+                    return (
+                      <View key={modelId} style={s.savedKeyRow}>
+                        <Text style={s.savedKeyLabel}>{m?.label || modelId}</Text>
+                        <Text style={s.savedKeyValue}>{cfg.apiKey ? '••••' + cfg.apiKey.slice(-4) : '未填写'}</Text>
+                      </View>
+                    );
+                  })}
+                  {Object.keys(modelConfigs).filter(m => m !== selectedModel).length === 0 && (
+                    <Text style={s.helper}>暂无其他已配置的模型</Text>
                   )}
                 </View>
               )}
 
-              <TouchableOpacity style={s.saveBtn} onPress={() => { saveConfig(); addToast('配置已保存 ✓', 'success'); }} activeOpacity={0.85}>
+              <TouchableOpacity
+                style={s.saveBtn}
+                onPress={() => { saveConfig(); addToast('配置已保存 ✓', 'success'); }}
+                activeOpacity={0.85}
+              >
                 <Text style={s.saveBtnText}>保存配置</Text>
               </TouchableOpacity>
             </View>
 
             <View style={{ alignItems:'center', paddingVertical: 24 }}>
-              <Text style={{ fontSize: 12, color: colors.inkMuted }}>灵感炼金炉 Idea2Agent · v1.0</Text>
-              <Text style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, textAlign:'center' }}>将模糊想法炼制为 PRD 与分步开发指令</Text>
+              <Text style={{ fontSize: 12, color: colors.inkMuted }}>灵感炼金炉 Idea2Agent · v1.2.0</Text>
+              <Text style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, textAlign:'center' }}>
+                支持 DeepSeek / OpenAI / Anthropic / Gemini / Groq / OpenRouter / Ollama
+              </Text>
             </View>
           </ScrollView>
         )}
@@ -263,6 +484,9 @@ export default function App() {
   );
 }
 
+/* ─────────────────────────────────────────────
+   样式
+───────────────────────────────────────────── */
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection:'row', alignItems:'center', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.borderLight, gap: 12 },
@@ -284,8 +508,12 @@ const s = StyleSheet.create({
   ideaInput: { backgroundColor: colors.bg, borderRadius: 10, borderWidth:1, borderColor: colors.borderLight, padding: 13, fontSize: 14.5, color: colors.ink, lineHeight: 22, minHeight: 145 },
   chip: { backgroundColor: colors.bg, borderWidth:1, borderColor: colors.borderLight, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, marginRight: 8 },
   chipText: { fontSize: 12.5, color: colors.inkFaint },
-  reminder: { backgroundColor: colors.emberTint, borderWidth:1, borderColor:'#fde68a', borderRadius: 14, paddingVertical: 13, paddingHorizontal: 16, marginBottom: 14, alignItems:'center' },
-  reminderText: { fontSize: 13.5, color: colors.emberTintDark, fontWeight:'600' },
+  modelHint: { flexDirection:'row', alignItems:'center', backgroundColor: colors.emberTint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, marginBottom: 10, gap: 8 },
+  modelHintIcon: { fontSize: 14 },
+  modelHintText: { flex: 1, fontSize: 13, color: colors.emberTintDark, fontWeight:'600' },
+  modelHintArrow: { fontSize: 18, color: colors.emberTintDark },
+  reminder: { backgroundColor: '#fef2f2', borderWidth:1, borderColor:'#fecaca', borderRadius: 14, paddingVertical: 13, paddingHorizontal: 16, marginBottom: 10, alignItems:'center' },
+  reminderText: { fontSize: 13.5, color: '#991b1b', fontWeight:'600' },
   genBtn: { backgroundColor: colors.ember, borderRadius: 14, paddingVertical: 16, alignItems:'center', justifyContent:'center', flexDirection:'row', shadowColor: colors.emberDark, shadowOffset:{width:0,height:4}, shadowOpacity:0.28, shadowRadius:10, elevation:6 },
   genBtnOff: { backgroundColor: colors.inkMuted, shadowOpacity: 0 },
   genBtnText: { fontSize: 16, fontWeight:'700', color:'#fff', letterSpacing: 0.3 },
@@ -295,12 +523,13 @@ const s = StyleSheet.create({
   actBtnText: { fontSize: 13, fontWeight:'500', color: colors.inkFaint },
   cfgInput: { backgroundColor: colors.bg, borderRadius: 10, borderWidth:1, borderColor: colors.borderLight, paddingHorizontal: 13, paddingVertical: 12, fontSize: 14, color: colors.ink, marginBottom: 6, fontFamily:'monospace' },
   helper: { fontSize: 12, color: colors.inkMuted, marginBottom: 8 },
-  provBtn: { flex:1, paddingVertical: 10, borderRadius: 10, borderWidth:1, borderColor: colors.borderLight, alignItems:'center', backgroundColor: colors.bg },
-  provBtnOn: { backgroundColor: colors.emberTint, borderColor: colors.ember },
-  provText: { fontSize: 13, color: colors.inkFaint, fontWeight:'500' },
-  provTextOn: { color: colors.emberTintDark, fontWeight:'700' },
-  advToggle: { paddingVertical: 10 },
+  providerInfo: { marginTop: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.borderLight },
+  providerInfoText: { fontSize: 12, color: colors.inkMid },
+  advToggle: { paddingVertical: 12, marginTop: 4 },
   advToggleText: { fontSize: 13, color: colors.inkFaint },
+  savedKeyRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+  savedKeyLabel: { fontSize: 13, color: colors.inkMid },
+  savedKeyValue: { fontSize: 12, color: colors.inkFaint, fontFamily:'monospace' },
   saveBtn: { backgroundColor: colors.surface, borderWidth:1, borderColor: colors.ember, borderRadius: 14, paddingVertical: 14, alignItems:'center', marginTop: 20 },
   saveBtnText: { fontSize: 15, fontWeight:'700', color: colors.ember },
   emptyWrap: { flex:1, alignItems:'center', justifyContent:'center', padding: 32 },
@@ -311,4 +540,24 @@ const s = StyleSheet.create({
   featureItem: { flexDirection:'row', alignItems:'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.surface, borderRadius: 10, borderWidth:1, borderColor: colors.borderLight, width: 130 },
   featureIcon: { fontSize: 14, color: colors.ember },
   featureLabel: { fontSize: 12, color: colors.inkFaint },
+
+  // 下拉菜单样式
+  pickerBtn: { flexDirection:'row', alignItems:'center', backgroundColor: colors.bg, borderRadius: 12, borderWidth:1, borderColor: colors.ember, paddingHorizontal: 14, paddingVertical: 13, gap: 8 },
+  pickerLabel: { fontSize: 10, color: colors.inkFaint, textTransform:'uppercase', letterSpacing: 0.5 },
+  pickerValue: { fontSize: 15, fontWeight:'600', color: colors.ink, marginTop: 2 },
+  pickerArrow: { fontSize: 12, color: colors.ember },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent:'center', alignItems:'center', padding: 20 },
+  dropdownContainer: { backgroundColor: colors.surface, borderRadius: 18, width: '100%', maxHeight: '80%', overflow:'hidden', borderWidth:1, borderColor: colors.border },
+  dropdownHeader: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth:1, borderBottomColor: colors.borderLight },
+  dropdownTitle: { fontSize: 16, fontWeight:'700', color: colors.ink },
+  dropdownClose: { fontSize: 18, color: colors.inkFaint, padding: 4 },
+  dropdownList: { paddingVertical: 8 },
+  groupHeader: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 },
+  groupLabel: { fontSize: 11, fontWeight:'700', color: colors.ember, textTransform:'uppercase', letterSpacing: 1 },
+  modelItem: { flexDirection:'row', alignItems:'center', paddingHorizontal: 18, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight, gap: 10 },
+  modelItemSelected: { backgroundColor: colors.emberTint },
+  modelName: { fontSize: 14, color: colors.ink },
+  modelNameSelected: { fontWeight:'600', color: colors.ember },
+  modelProvider: { fontSize: 11, color: colors.inkFaint, marginTop: 2 },
+  checkmark: { fontSize: 16, color: colors.ember, fontWeight:'700' },
 });
