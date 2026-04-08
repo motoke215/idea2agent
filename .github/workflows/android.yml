@@ -10,13 +10,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          working-directory: idea2agent-app
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -37,8 +30,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build APK (Debug)
-        run: cd android && ./gradlew assembleDebug
-        working-directory: idea2agent-app
+        run: cd idea2agent-app/android && ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
