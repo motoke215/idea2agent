@@ -29,8 +29,8 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build APK (Debug) - with verbose output
-        run: cd idea2agent-app/android && ./gradlew assembleDebug --info 2>&1 | tail -100
+      - name: Build APK (Debug)
+        run: cd android && ./gradlew assembleDebug --stacktrace
         working-directory: idea2agent-app
 
       - name: Upload APK
