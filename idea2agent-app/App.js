@@ -683,7 +683,7 @@ const s = StyleSheet.create({
   pickerValue: { fontSize: 15, fontWeight:'600', color: colors.ink, marginTop: 2 },
   pickerArrow: { fontSize: 12, color: colors.ember },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent:'center', alignItems:'center', padding: 20 },
-  dropdownContainer: { backgroundColor: colors.surface, borderRadius: 18, width: '100%', maxHeight: '80%', overflow:'hidden', borderWidth:1, borderColor: colors.border },
+  dropdownContainer: { backgroundColor: colors.surface, borderRadius: 18, width: '100%', maxHeight: '90%', borderWidth:1, borderColor: colors.border },
   dropdownHeader: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal: 18, paddingVertical: 16, borderBottomWidth:1, borderBottomColor: colors.borderLight },
   dropdownTitle: { fontSize: 16, fontWeight:'700', color: colors.ink },
   dropdownClose: { fontSize: 18, color: colors.inkFaint, padding: 4 },

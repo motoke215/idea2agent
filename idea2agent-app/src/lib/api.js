@@ -353,9 +353,9 @@ export const MODEL_GROUPS = [
   { group: 'Groq', models: ['groq-llama-3.3-70b', 'groq-mixtral', 'groq-llama-3.1-8b'] },
   { group: 'OpenRouter', models: ['openrouter-anthropic', 'openrouter-openai', 'openrouter-google', 'openrouter-deepseek'] },
   { group: 'Ollama 本地', models: ['ollama-llama3', 'ollama-qwen', 'ollama-codellama', 'ollama-deepseek'] },
+  { group: '其他', models: ['custom'] },
   { group: 'MiniMax', models: ['minimax-chat'] },
   { group: '硅基流动', models: ['siliconflow'] },
-  { group: '其他', models: ['custom'] },
 ];
 
 /** Provider 显示名称 */
