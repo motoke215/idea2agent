@@ -1,4 +1,5 @@
 name: Android Build
+
 on:
   push:
     branches: [main]
@@ -7,8 +8,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -29,13 +32,13 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build APK (Debug)
-        run: cd android && ./gradlew assembleDebug --stacktrace
+      - name: Build APK (Release)
+        run: cd android && ./gradlew assembleRelease --stacktrace
         working-directory: idea2agent-app
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: idea2agent-app/android/app/build/outputs/apk/debug/app-debug.apk
+          name: app-release
+          path: idea2agent-app/android/app/build/outputs/apk/release/app-release.apk
