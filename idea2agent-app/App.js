@@ -13,6 +13,7 @@ import * as Network from 'expo-network';
 
 import { generateIdea, extractInstructions, DEFAULT_TIMEOUT, MODEL_REGISTRY, MODEL_GROUPS, PROVIDER_LABELS } from './src/lib/api';
 import { useToast } from './src/hooks/useToast';
+import { useHistory } from './src/hooks/useHistory';
 import { ToastContainer } from './src/components/Toast';
 import Skeleton from './src/components/Skeleton';
 import ResultRenderer from './src/components/ResultRenderer';
@@ -20,6 +21,15 @@ import { colors, radius } from './src/theme';
 
 /** 默认选中的模型 */
 const DEFAULT_MODEL = 'deepseek-chat';
+
+/** 硅基流动可选模型列表 */
+const SILICONFLOW_MODELS = [
+  { id: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen2.5-72B' },
+  { id: 'THUDM/glm-4-9b-chat', label: 'GLM-4-9B' },
+  { id: '01-ai/Yi-1.5-34B-Chat', label: 'Yi-1.5-34B' },
+  { id: 'deepseek-ai/DeepSeek-V2.5', label: 'DeepSeek-V2.5' },
+  { id: 'meta-llama/Llama-3.3-70B-Instruct', label: 'Llama-3.3-70B' },
+];
 
 /** 示例想法 */
 const EXAMPLES = [
@@ -109,7 +119,7 @@ function ModelPicker({ selectedModel, onSelect }) {
 function TabBar({ active, onChange }) {
   return (
     <View style={s.tabBar}>
-      {['输入', '结果', '配置'].map((t, i) => (
+      {['输入', '结果', '历史', '配置'].map((t, i) => (
         <TouchableOpacity key={t} style={[s.tab, active === i && s.tabActive]} onPress={() => onChange(i)} activeOpacity={0.75}>
           <Text style={[s.tabText, active === i && s.tabTextActive]}>{t}</Text>
         </TouchableOpacity>
@@ -173,10 +183,14 @@ export default function App() {
   // modelConfigs: { [modelId]: { apiKey, endpoint } }
   const [modelConfigs, setModelConfigs] = useState({});
   const [showAdv, setShowAdv] = useState(false);
+  const [showSiliconflowPicker, setShowSiliconflowPicker] = useState(false);
+  const [siliconflowSubModel, setSiliconflowSubModel] = useState('Qwen/Qwen2.5-72B-Instruct');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState('');
+const [result, setResult] = useState('');
   const [copied, setCopied] = useState(false);
+  const [historyList, setHistoryList] = useState([]);
   const { toasts, addToast } = useToast();
+  const { loadHistory, addHistory, deleteHistory, clearHistory } = useHistory(setHistoryList);
   const scrollRef = useRef(null);
 
   const statusBarStyle = colorScheme === 'dark' ? 'light' : 'dark';
@@ -186,7 +200,7 @@ export default function App() {
   const currentApiKey = currentModelConfig.apiKey || '';
   const currentEndpoint = currentModelConfig.endpoint || modelInfo.endpoint || '';
 
-  // 加载保存的配置
+  // 加载保存的配置和历史记录
   useEffect(() => {
     AsyncStorage.getItem('cfg_v3').then(raw => {
       if (!raw) return;
@@ -198,6 +212,8 @@ export default function App() {
         if (c.modelConfigs) setModelConfigs(c.modelConfigs);
       } catch {}
     });
+    // 加载历史记录
+    loadHistory().then(list => setHistoryList(list));
   }, []);
 
   const saveConfig = useCallback(() => {
@@ -249,6 +265,8 @@ export default function App() {
         timeout: DEFAULT_TIMEOUT,
       });
       setResult(content);
+      // 保存到历史记录
+      await addHistory(idea, selectedModel, content);
       setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
     } catch (err) {
       addToast(err.message || '未知错误，请稍后再试', 'error');
@@ -379,8 +397,77 @@ export default function App() {
           </View>
         )}
 
-        {/* ── Tab 2: 配置 ── */}
+        {/* ── Tab 3: 历史 ── */}
         {tab === 2 && (
+          <ScrollView contentContainerStyle={s.content}>
+            <View style={s.card}>
+              <View style={s.cardHead}>
+                <View style={[s.dot, { backgroundColor: colors.emberLight }]} />
+                <View style={[s.dot, { backgroundColor: colors.ember }]} />
+                <View style={[s.dot, { backgroundColor: colors.emberDark }]} />
+                <Text style={s.cardHeadText}>历史记录</Text>
+              </View>
+
+              {historyList.length === 0 ? (
+                <View style={s.emptyHistory}>
+                  <Text style={s.emptyHistoryIcon}>📭</Text>
+                  <Text style={s.emptyHistoryText}>暂无历史记录</Text>
+                  <Text style={s.emptyHistorySub}>生成 PRD 后会自动保存在此处</Text>
+                </View>
+              ) : (
+                <>
+                  {historyList.map((item, index) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[s.historyItem, index === 0 && s.historyItemFirst]}
+                      onPress={() => {
+                        setIdea(item.idea);
+                        setResult(item.content);
+                        setTab(1);
+                      }}
+                      activeOpacity={0.75}
+                    >
+                      <View style={s.historyHeader}>
+                        <Text style={s.historyIdea} numberOfLines={2}>{item.idea}</Text>
+                        <TouchableOpacity
+                          style={s.historyDeleteBtn}
+                          onPress={() => deleteHistory(item.id)}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <Text style={s.historyDeleteText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={s.historyMeta}>
+                        <Text style={s.historyModel}>
+                          {MODEL_REGISTRY[item.modelId]?.label || item.modelId}
+                        </Text>
+                        <Text style={s.historyTime}>
+                          {new Date(item.createdAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+
+                  <TouchableOpacity
+                    style={s.clearBtn}
+                    onPress={() => {
+                      if (historyList.length > 0) {
+                        clearHistory();
+                        addToast('历史记录已清空', 'info');
+                      }
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={s.clearBtnText}>清空全部历史</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </ScrollView>
+        )}
+
+        {/* ── Tab 3: 配置 ── */}
+        {tab === 3 && (
           <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
             <View style={s.card}>
               <Label>选择模型</Label>
@@ -394,6 +481,55 @@ export default function App() {
                   {modelInfo.isCustom && ' · 自定义地址'}
                 </Text>
               </View>
+
+              {/* 硅基流动子模型选择 */}
+              {currentProvider === 'siliconflow' && (
+                <View style={{ marginTop: 16 }}>
+                  <Label>选择子模型</Label>
+                  <TouchableOpacity
+                    style={s.pickerBtn}
+                    onPress={() => setShowSiliconflowPicker(true)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.pickerValue}>{siliconflowSubModel}</Text>
+                    </View>
+                    <Text style={s.pickerArrow}>▼</Text>
+                  </TouchableOpacity>
+
+                  <Modal visible={showSiliconflowPicker} transparent animationType="fade" onRequestClose={() => setShowSiliconflowPicker(false)}>
+                    <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowSiliconflowPicker(false)}>
+                      <View style={s.dropdownContainer}>
+                        <View style={s.dropdownHeader}>
+                          <Text style={s.dropdownTitle}>选择硅基流动模型</Text>
+                          <TouchableOpacity onPress={() => setShowSiliconflowPicker(false)}>
+                            <Text style={s.dropdownClose}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <ScrollView style={s.dropdownList} showsVerticalScrollIndicator={false}>
+                          {SILICONFLOW_MODELS.map(item => (
+                            <TouchableOpacity
+                              key={item.id}
+                              style={[s.modelItem, siliconflowSubModel === item.id && s.modelItemSelected]}
+                              onPress={() => {
+                                setSiliconflowSubModel(item.id);
+                                setShowSiliconflowPicker(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={[s.modelName, siliconflowSubModel === item.id && s.modelNameSelected]}>{item.label}</Text>
+                                <Text style={s.modelProvider}>{item.id}</Text>
+                              </View>
+                              {siliconflowSubModel === item.id && <Text style={s.checkmark}>✓</Text>}
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    </TouchableOpacity>
+                  </Modal>
+                </View>
+              )}
 
               {/* API 地址（所有模型都显示） */}
               <View style={{ marginTop: 16 }}>
@@ -560,4 +696,21 @@ const s = StyleSheet.create({
   modelNameSelected: { fontWeight:'600', color: colors.ember },
   modelProvider: { fontSize: 11, color: colors.inkFaint, marginTop: 2 },
   checkmark: { fontSize: 16, color: colors.ember, fontWeight:'700' },
+
+  // 历史记录样式
+  emptyHistory: { alignItems:'center', paddingVertical: 40 },
+  emptyHistoryIcon: { fontSize: 48, marginBottom: 12 },
+  emptyHistoryText: { fontSize: 16, fontWeight:'600', color: colors.inkMuted, marginBottom: 6 },
+  emptyHistorySub: { fontSize: 13, color: colors.inkFaint, textAlign:'center' },
+  historyItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+  historyItemFirst: { borderTopWidth: 1, borderTopColor: colors.borderLight, marginTop: 8, paddingTop: 16 },
+  historyHeader: { flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start', marginBottom: 8 },
+  historyIdea: { flex: 1, fontSize: 14, color: colors.ink, lineHeight: 20, paddingRight: 12 },
+  historyDeleteBtn: { padding: 4 },
+  historyDeleteText: { fontSize: 14, color: colors.inkFaint },
+  historyMeta: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  historyModel: { fontSize: 12, color: colors.ember, fontWeight:'500' },
+  historyTime: { fontSize: 12, color: colors.inkFaint },
+  clearBtn: { backgroundColor: colors.surface, borderWidth:1, borderColor: '#fecaca', borderRadius: 14, paddingVertical: 14, alignItems:'center', marginTop: 20 },
+  clearBtnText: { fontSize: 14, fontWeight:'600', color: '#991b1b' },
 });

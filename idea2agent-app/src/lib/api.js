@@ -280,6 +280,60 @@ export const MODEL_REGISTRY = {
     isLocal: true,
   },
 
+  // ── MiniMax ──
+  'minimax-chat': {
+    label: 'MiniMax Chat',
+    provider: 'minimax',
+    endpoint: 'https://api.minimax.chat/v1/text/chatcompletion_v2',
+    defaultModel: 'minimax-m2.7',
+  },
+
+  // ── 硅基流动 (SiliconFlow) ──
+  'siliconflow': {
+    label: '硅基流动',
+    provider: 'siliconflow',
+    endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    defaultModel: 'Qwen/Qwen2.5-72B-Instruct',
+    isCustom: false,
+  },
+
+  // ── 硅基流动子模型（仅供选择，实际使用统一入口） ──
+  'siliconflow-qwen': {
+    label: 'SiliconFlow Qwen',
+    provider: 'siliconflow',
+    endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    defaultModel: 'Qwen/Qwen2.5-72B-Instruct',
+    parentModel: 'siliconflow',
+  },
+  'siliconflow-glm': {
+    label: 'SiliconFlow GLM',
+    provider: 'siliconflow',
+    endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    defaultModel: 'THUDM/glm-4-9b-chat',
+    parentModel: 'siliconflow',
+  },
+  'siliconflow-yi': {
+    label: 'SiliconFlow Yi',
+    provider: 'siliconflow',
+    endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    defaultModel: '01-ai/Yi-1.5-34B-Chat',
+    parentModel: 'siliconflow',
+  },
+  'siliconflow-deepseek': {
+    label: 'SiliconFlow DeepSeek',
+    provider: 'siliconflow',
+    endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    defaultModel: 'deepseek-ai/DeepSeek-V2.5',
+    parentModel: 'siliconflow',
+  },
+  'siliconflow-llama': {
+    label: 'SiliconFlow Llama',
+    provider: 'siliconflow',
+    endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct',
+    parentModel: 'siliconflow',
+  },
+
   // ── 自定义 API ──
   'custom': {
     label: '自定义 API',
@@ -299,6 +353,8 @@ export const MODEL_GROUPS = [
   { group: 'Groq', models: ['groq-llama-3.3-70b', 'groq-mixtral', 'groq-llama-3.1-8b'] },
   { group: 'OpenRouter', models: ['openrouter-anthropic', 'openrouter-openai', 'openrouter-google', 'openrouter-deepseek'] },
   { group: 'Ollama 本地', models: ['ollama-llama3', 'ollama-qwen', 'ollama-codellama', 'ollama-deepseek'] },
+  { group: 'MiniMax', models: ['minimax-chat'] },
+  { group: '硅基流动', models: ['siliconflow'] },
   { group: '其他', models: ['custom'] },
 ];
 
@@ -311,6 +367,8 @@ export const PROVIDER_LABELS = {
   groq: 'Groq',
   openrouter: 'OpenRouter',
   ollama: 'Ollama',
+  minimax: 'MiniMax',
+  siliconflow: '硅基流动',
   custom: '自定义',
 };
 

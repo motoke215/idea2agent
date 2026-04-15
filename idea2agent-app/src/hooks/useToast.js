@@ -1,12 +1,11 @@
-import { useState, useCallback } from 'react';
-
-let _id = 0;
+import { useState, useCallback, useRef } from 'react';
 
 export function useToast() {
   const [toasts, setToasts] = useState([]);
+  const idRef = useRef(0);
 
   const addToast = useCallback((message, type = 'info') => {
-    const id = ++_id;
+    const id = ++idRef.current;
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));

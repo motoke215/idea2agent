@@ -34,9 +34,12 @@ export default function Skeleton() {
   const spinAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.timing(spinAnim, { toValue: 1, duration: 1100, useNativeDriver: true })
-    ).start();
+    );
+    loop.start();
+    // 组件卸载时停止动画，防止内存泄漏
+    return () => loop.stop();
   }, []);
 
   const spin = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
