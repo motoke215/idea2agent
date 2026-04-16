@@ -72,7 +72,7 @@ function ModelPicker({ selectedModel, onSelect }) {
                 <Text style={s.dropdownClose}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView ref={scrollRef} style={s.dropdownList} showsVerticalScrollIndicator={false}>
+            <ScrollView ref={scrollRef} style={s.dropdownList} showsVerticalScrollIndicator={true}>
               {MODEL_GROUPS.map(group => (
                 <View key={group.group}>
                   <View style={s.groupHeader}>
@@ -506,7 +506,7 @@ const [result, setResult] = useState('');
                             <Text style={s.dropdownClose}>✕</Text>
                           </TouchableOpacity>
                         </View>
-                        <ScrollView style={s.dropdownList} showsVerticalScrollIndicator={false}>
+                        <ScrollView style={s.dropdownList} showsVerticalScrollIndicator={true}>
                           {SILICONFLOW_MODELS.map(item => (
                             <TouchableOpacity
                               key={item.id}
